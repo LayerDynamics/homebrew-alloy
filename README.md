@@ -7,8 +7,9 @@ a local agent harness with unified CPU/Metal inference on Apple Silicon.
 
 Requires **Apple Silicon, macOS 14 or newer, and Xcode 15 or newer** with
 command-line tools and the Metal compiler. This first formula builds from an
-immutable source commit. The native build can take several minutes, with
-build progress shown in the terminal.
+immutable source commit. The native build can take several minutes. Homebrew
+shows build stages; add `--verbose` to the install command for detailed
+compiler output.
 
 **Availability:** the working formula is prepared in this change. The command
 below becomes available after [Alloy PR #26](https://github.com/LayerDynamics/alloy/pull/26)
@@ -89,8 +90,8 @@ external user data.
 ## Validation and formula updates
 
 This tap's hosted ARM64 macOS workflow checks the canonical formula's Ruby
-syntax, Homebrew loading, actual source installation, shared-command linking
-and CLI/daemon selection. The hosted VM does **not** establish Metal execution,
+syntax, Homebrew loading, HTTPS GitHub source download, actual installation,
+shared-command linking and CLI/daemon selection. The hosted VM does **not** establish Metal execution,
 so that job does not run the native formula test or claim inference acceptance.
 
 The [Alloy source workflow](https://github.com/LayerDynamics/alloy/blob/main/.github/workflows/ci.yaml)
@@ -99,6 +100,13 @@ and formula test in an owned, uniquely named keg-only installation, followed
 by CPU/Metal/shared-array and real-model checks with the original build tree
 unavailable. It retains the formula, source identity and complete evidence
 without replacing an existing `alloy` installation.
+
+For that candidate CI run, the test formula uses an owned local bare Git
+snapshot of the exact checkout, including detached/shallow synthetic PR merge
+commits that may be unavailable from GitHub's normal source download. Commit
+and tree identities are preserved and the snapshot has its own complete
+objects. The public formula continues to use the pinned HTTPS GitHub source;
+the hosted installation checks that download path separately.
 
 `Formula/alloy.rb` is generated from the reviewed Alloy source commit using
 [`scripts/homebrew/formula.mjs`](https://github.com/LayerDynamics/alloy/blob/main/scripts/homebrew/formula.mjs).
