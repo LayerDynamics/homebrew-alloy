@@ -2,7 +2,7 @@
 class Alloy < Formula
   desc "Apple Silicon agent harness with unified CPU/Metal inference"
   homepage "https://github.com/LayerDynamics/alloy"
-  url "https://github.com/LayerDynamics/alloy.git", revision: "ae23152a03e0b1d7f6b876455815c3918b339f81"
+  url "https://github.com/LayerDynamics/alloy.git", revision: "f172e7ba81b87fa371366231c02aab4dc7b84894"
   version "0.1.0"
   license "Apache-2.0"
 
@@ -58,7 +58,7 @@ class Alloy < Formula
     node_root = prepare_toolchains
     system node_root/"bin/node", "scripts/homebrew/package.mjs",
            "--prefix", prefix, "--opt-prefix", opt_prefix,
-           "--node-runtime", node_root, "--source-commit", "ae23152a03e0b1d7f6b876455815c3918b339f81", "--offline"
+           "--node-runtime", node_root, "--source-commit", "f172e7ba81b87fa371366231c02aab4dc7b84894", "--offline"
   end
 
   def caveats

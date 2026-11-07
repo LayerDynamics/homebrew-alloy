@@ -49,14 +49,14 @@ jobs:
           brew config > "$ALLOY_TAP_EVIDENCE/brew-config.txt"
           xcodebuild -version > "$ALLOY_TAP_EVIDENCE/xcode-version.txt"
           xcrun --find metal
-          ruby -c Formula/alloy.rb
+          ruby -c alloy.rb
           git rev-parse HEAD > "$ALLOY_TAP_EVIDENCE/tap-commit.txt"
-          cp Formula/alloy.rb "$ALLOY_TAP_EVIDENCE/tested-formula.rb"
+          cp alloy.rb "$ALLOY_TAP_EVIDENCE/tested-formula.rb"
 
           tap_dir="$(brew --repository)/Library/Taps/layerdynamics/homebrew-alloy"
           test ! -e "$tap_dir"
           brew tap --custom-remote LayerDynamics/alloy "$GITHUB_WORKSPACE"
-          cmp Formula/alloy.rb "$tap_dir/Formula/alloy.rb"
+          cmp alloy.rb "$tap_dir/alloy.rb"
 
       - name: Install the candidate source formula
         shell: bash
@@ -74,7 +74,7 @@ jobs:
           brew_prefix="$(brew --prefix)"
           "$alloy_prefix/libexec/node/bin/node" --input-type=module - \
             "$alloy_prefix" "$brew_prefix" "$ALLOY_TAP_EVIDENCE" \
-            "$GITHUB_WORKSPACE/Formula/alloy.rb" <<'JS'
+            "$GITHUB_WORKSPACE/alloy.rb" <<'JS'
           import assert from "node:assert/strict";
           import fs from "node:fs";
           import path from "node:path";

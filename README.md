@@ -108,7 +108,7 @@ and tree identities are preserved and the snapshot has its own complete
 objects. The public formula continues to use the pinned HTTPS GitHub source;
 the hosted installation checks that download path separately.
 
-`Formula/alloy.rb` is generated from the reviewed Alloy source commit using
+The root-level [`alloy.rb`](alloy.rb) is generated from the reviewed Alloy source commit using
 [`scripts/homebrew/formula.mjs`](https://github.com/LayerDynamics/alloy/blob/main/scripts/homebrew/formula.mjs).
 Its source revision is immutable, and official Node/Rust resources have
 pinned checksums. Advance the formula version or revision when changing an
