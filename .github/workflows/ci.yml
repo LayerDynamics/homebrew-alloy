@@ -1,0 +1,140 @@
+name: Homebrew installation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canonical-install:
+    name: Canonical formula and installed commands
+    # This is the hosted ARM64 label. Native Metal acceptance runs on Alloy's
+    # physical Mac runner; this VM does not substitute for that gate.
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_AUTOREMOVE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      - name: Initialize installation evidence paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            "HOMEBREW_LOGS=$RUNNER_TEMP/alloy-homebrew-logs" \
+            "ALLOY_TAP_EVIDENCE=$RUNNER_TEMP/alloy-tap-evidence" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/alloy-homebrew-logs" "$RUNNER_TEMP/alloy-tap-evidence"
+
+      - name: Check out the candidate tap
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check host and stage the canonical formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ALLOY_TAP_EVIDENCE"
+          test "$(uname -m)" = arm64
+          brew --version > "$ALLOY_TAP_EVIDENCE/brew-version.txt"
+          brew config > "$ALLOY_TAP_EVIDENCE/brew-config.txt"
+          xcodebuild -version > "$ALLOY_TAP_EVIDENCE/xcode-version.txt"
+          xcrun --find metal
+          ruby -c alloy.rb
+          git rev-parse HEAD > "$ALLOY_TAP_EVIDENCE/tap-commit.txt"
+          cp alloy.rb "$ALLOY_TAP_EVIDENCE/tested-formula.rb"
+
+          tap_dir="$(brew --repository)/Library/Taps/layerdynamics/homebrew-alloy"
+          test ! -e "$tap_dir"
+          brew tap --custom-remote LayerDynamics/alloy "$GITHUB_WORKSPACE"
+          cmp alloy.rb "$tap_dir/alloy.rb"
+
+      - name: Install the candidate source formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install --build-from-source LayerDynamics/alloy/alloy 2>&1 | tee "$ALLOY_TAP_EVIDENCE/install.log"
+          brew readall --no-simulate LayerDynamics/alloy 2>&1 | tee "$ALLOY_TAP_EVIDENCE/readall.log"
+          brew info --json=v2 LayerDynamics/alloy/alloy > "$ALLOY_TAP_EVIDENCE/brew-info.json"
+
+      - name: Verify canonical links and packaged CLI without native execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          alloy_prefix="$(brew --prefix LayerDynamics/alloy/alloy)"
+          brew_prefix="$(brew --prefix)"
+          "$alloy_prefix/libexec/node/bin/node" --input-type=module - \
+            "$alloy_prefix" "$brew_prefix" "$ALLOY_TAP_EVIDENCE" \
+            "$GITHUB_WORKSPACE/alloy.rb" <<'JS'
+          import assert from "node:assert/strict";
+          import fs from "node:fs";
+          import path from "node:path";
+          import { spawnSync } from "node:child_process";
+
+          const [prefix, brewPrefix, evidence, formulaPath] = process.argv.slice(2);
+          const manifestPath = path.join(prefix, "libexec/install.json");
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+          const pin = fs.readFileSync(formulaPath, "utf8").match(/revision:\s*"([a-f0-9]{40})"/)?.[1];
+          assert.ok(pin, "formula must pin an immutable source commit");
+          assert.equal(manifest.source_commit, pin);
+          assert.equal(process.arch, "arm64");
+          assert.equal(process.version, "v" + manifest.node_version);
+          const config = path.join(evidence, "isolated-config");
+          const env = { ...process.env, PATH: "/usr/bin:/bin:/usr/sbin:/sbin", ALLOY_CONFIG_DIR: config };
+          delete env.ALLOYD;
+          delete env.ALLOY_QWEN3_ARTIFACT;
+
+          function run(name, args, expected = 0) {
+            const command = path.join(brewPrefix, "bin", name);
+            assert.ok(fs.lstatSync(command).isSymbolicLink(), name + " must be linked into Homebrew bin");
+            assert.equal(fs.realpathSync(command), fs.realpathSync(path.join(prefix, "bin", name)));
+            const result = spawnSync(command, args, { env, encoding: "utf8", timeout: 20000, maxBuffer: 1024 * 1024 });
+            assert.ifError(result.error);
+            assert.equal(result.status, expected, name + " " + args.join(" ") + ": " + result.stderr);
+            return result.stdout;
+          }
+
+          assert.equal(run("alloy", ["--version"]), "alloy " + manifest.version + "\n");
+          assert.equal(run("alloyd", ["--version"]), "alloyd " + manifest.version + "\n");
+          assert.match(run("alloy", ["--help"]), /ALLOY_CONFIG_DIR/);
+          const doctor = JSON.parse(run("alloy", ["doctor", "--json"], 1));
+          assert.equal(doctor.readiness, "setup_required");
+          assert.equal(doctor.launch.kind, "binary");
+          assert.equal(fs.realpathSync(doctor.launch.command), fs.realpathSync(path.join(prefix, "libexec/native/alloyd")));
+          assert.ok(fs.existsSync(path.join(prefix, "libexec/native/mlx.metallib")));
+          fs.accessSync(path.join(prefix, "libexec/cli/dist/native/alloy-metrics"), fs.constants.X_OK);
+          assert.equal(fs.existsSync(path.join(config, "settings.json")), false);
+          fs.copyFileSync(manifestPath, path.join(evidence, "install.json"));
+          fs.writeFileSync(path.join(evidence, "doctor.json"), JSON.stringify(doctor, null, 2) + "\n");
+          fs.writeFileSync(path.join(evidence, "result.json"), JSON.stringify({
+            test: "homebrew_canonical_hosted_install",
+            status: "passed",
+            source_commit: pin,
+            version: manifest.version,
+            node_version: manifest.node_version,
+            canonical_links: ["alloy", "alloyd"],
+            native_execution: "not run; required on the physical Mac source workflow",
+          }, null, 2) + "\n");
+          JS
+
+      # The formula's brew test requires actual CPU/Metal/shared-array execution.
+      # Keep that requirement intact; the source PR's physical Mac runs it.
+      - name: Retain installation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-hosted-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/alloy-tap-evidence/
+            ${{ runner.temp }}/alloy-homebrew-logs/
+          if-no-files-found: warn
+          retention-days: 30
